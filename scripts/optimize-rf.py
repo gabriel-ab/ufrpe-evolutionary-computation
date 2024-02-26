@@ -71,7 +71,7 @@ class Individual:
 
     @cached_property
     def model(self):
-        return RandomForestClassifier(**dc.asdict(self))
+        return RandomForestClassifier(**dc.asdict(self), random_state=RANDOM_STATE)
 
     def mutate(self, indpb: float = 0.2) -> tuple[Self]:
         "Take one field and re-generate i'ts value"

@@ -72,7 +72,7 @@ class Individual:
 
     @cached_property
     def model(self):
-        return SVC(**dc.asdict(self))
+        return SVC(**dc.asdict(self), random_state=RANDOM_STATE)
 
     def mutate(self, indpb: float = 0.2):
         "Take one field and re-generate i'ts value"
