@@ -2,6 +2,7 @@
 from pathlib import Path
 import dataclasses as dc
 import random
+from typing import Self
 import warnings
 from functools import cached_property, partial
 import json
@@ -16,8 +17,8 @@ from sklearn.ensemble import RandomForestClassifier
 from tqdm.contrib.concurrent import process_map
 
 # %%
-NUM_GENERATIONS = 6
-POPULATION_SIZE = 12
+NUM_GENERATIONS = 32
+POPULATION_SIZE = 64
 RANDOM_STATE = 42
 
 DATA_BASE_DIR = Path("../data/")
@@ -58,7 +59,7 @@ def bool_field() -> bool:
     return dc.field(default_factory=factory)
 
 
-@dc.dataclass(slots=True)
+@dc.dataclass
 class Individual:
     n_estimators: int = int_field(10, 200)
     max_depth: int = int_field(1, 20)
@@ -71,15 +72,15 @@ class Individual:
     def model(self):
         return RandomForestClassifier(**dc.asdict(self))
 
-    def mutate(self, indpb: float = 0.2):
+    def mutate(self, indpb: float = 0.2) -> tuple[Self]:
         "Take one field and re-generate i'ts value"
         fields = dc.fields(self)
         if random.random() < indpb:
             field = random.choice(fields)
             setattr(self, field.name, field.default_factory())
-        return self
+        return (self,)
 
-    def mate_onepoint(self, other):
+    def mate_onepoint(self, other) -> tuple[Self, Self]:
         field_names = [field.name for field in dc.fields(self)]
         point = random.randint(0, len(field_names))
         child1 = type(self)(
@@ -96,7 +97,7 @@ class Individual:
         )
         return child1, child2
 
-    def mate_oneattr(self, other):
+    def mate_oneattr(self, other) -> tuple[Self, Self]:
         field_names = [field.name for field in dc.fields(self)]
         point = random.randint(0, len(field_names))
         child1 = type(self)(
@@ -113,16 +114,15 @@ class Individual:
         )
         return child1, child2
 
-    def evaluate(self, x_train, x_test, y_train, y_test):
+    def evaluate(self, x_train, x_test, y_train, y_test)-> tuple[float]:
         with warnings.catch_warnings(action="ignore"):
             ypred = self.model.fit(x_train, y_train).predict(x_test)
         error = metrics.mean_squared_error(y_test, ypred)
-        size_error = sum(self)
-        return error, size_error
+        return (error,)
 
 
 # %%
-creator.create("FitnessMin", base.Fitness, weights=(-1.0, -1.0))
+creator.create("FitnessMin", base.Fitness, weights=(-1.0, ))
 creator.create("Individual", Individual, fitness=creator.FitnessMin)
 
 
@@ -136,15 +136,15 @@ def preprocess():
         X_test_encoded = np.load(X_test_encoded_path)
     else:
         nlp = spacy.load("en_core_web_lg")
-        X_train = pd.read_csv(DATA_BASE_DIR / "X_train.csv")
-        X_test = pd.read_csv(DATA_BASE_DIR / "X_test.csv")
+        X_train = pd.read_csv(DATA_BASE_DIR / "X_train.csv", index_col=0)
+        X_test = pd.read_csv(DATA_BASE_DIR / "X_test.csv", index_col=0)
         X_train_encoded = np.array([nlp(x["input"]).vector for _, x in X_train.iterrows()], dtype=np.float32)
         X_test_encoded = np.array([nlp(x["input"]).vector for _, x in X_test.iterrows()], dtype=np.float32)
         np.save(X_train_encoded_path, X_train_encoded)
         np.save(X_test_encoded_path, X_test_encoded)
 
-    y_train = pd.read_csv(DATA_BASE_DIR / "y_train.csv")
-    y_test = pd.read_csv(DATA_BASE_DIR / "y_test.csv")
+    y_train = pd.read_csv(DATA_BASE_DIR / "y_train.csv", index_col=0)
+    y_test = pd.read_csv(DATA_BASE_DIR / "y_test.csv", index_col=0)
 
     return y_train, y_test, X_train_encoded, X_test_encoded
 
@@ -193,6 +193,22 @@ def run(ngen: int, population: int, halloffame: int = 5):
     report = classification_report(y_test, model.predict(X_test_encoded), output_dict=True)
     return report
 
+
+def test():
+    y_train, y_test, X_train_encoded, X_test_encoded = preprocess()
+    print('X shape', X_train_encoded.shape, 'y shape:', y_train.shape)
+
+    evaluate = partial(
+        Individual.evaluate,
+        x_train=X_train_encoded,
+        x_test=X_test_encoded,
+        y_train=y_train,
+        y_test=y_test,
+    )
+    x = Individual()
+    print(x)
+    print(evaluate(x))
+    print(classification_report(y_test, x.model.predict(X_test_encoded)))
 
 # %%
 if __name__ == "__main__":
