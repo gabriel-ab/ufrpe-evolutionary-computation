@@ -2,6 +2,7 @@
 from pathlib import Path
 import dataclasses as dc
 import random
+import time
 from typing import Self
 import warnings
 from functools import cached_property, partial
@@ -178,19 +179,21 @@ def run(ngen: int, population: int, halloffame: int = 5):
     stats.register("min", lambda pop: min(ind.fitness.values for ind in pop))
 
     print("Iniciando Algoritmo")
+    elapsed_time = time.perf_counter()
     pop, log = algorithms.eaSimple(
         pop, toolbox, 0.2, 0.2, ngen=ngen, halloffame=hof, stats=stats
     )
+    elapsed_time = time.perf_counter() - elapsed_time
+
     print(log)
-    for ind in hof:
-        report = ind.fitness.values
-        print("Error: %s, Size: %s" % (report["accuracy"]))
-    print(
-        "Best model parameters: %s - accuracy: %f" % (hof[0], hof[0].fitness.values[0])
-    )
+    for i, ind in enumerate(hof, 1):
+        print(f"hof {i} - Error: {ind.fitness.values[0]} - Individual: {ind}")
 
     model = hof[0].model
     report = classification_report(y_test, model.predict(X_test_encoded), output_dict=True)
+    report['best_params'] = dc.asdict(hof[0])
+    report['elapsed_time'] = elapsed_time
+    report['log_book'] = log
     return report
 
 
