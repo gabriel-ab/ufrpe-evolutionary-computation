@@ -73,12 +73,11 @@ class Individual:
     def model(self):
         return RandomForestClassifier(**dc.asdict(self), random_state=RANDOM_STATE)
 
-    def mutate(self, indpb: float = 0.2) -> tuple[Self]:
+    def mutate(self) -> tuple[Self]:
         "Take one field and re-generate i'ts value"
-        fields = dc.fields(self)
-        if random.random() < indpb:
-            field = random.choice(fields)
-            setattr(self, field.name, field.default_factory())
+        field = random.choice(dc.fields(self))
+        setattr(self, field.name, field.default_factory())
+        del self.model
         return (self,)
 
     def mate_onepoint(self, other) -> tuple[Self, Self]:
