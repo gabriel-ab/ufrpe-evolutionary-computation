@@ -18,13 +18,22 @@ from sklearn.svm import SVC
 from tqdm.contrib.concurrent import process_map
 
 # %%
-NUM_GENERATIONS = 32
-POPULATION_SIZE = 64
+MULTIPROCESS = True
+NUM_GENERATIONS = 16
+POPULATION_SIZE = 32
 RANDOM_STATE = 42
 
 DATA_BASE_DIR = Path("../data/")
-CLASSIFICATION_REPORT_OUTPUT = DATA_BASE_DIR / "report-svm.json"
+CLASSIFICATION_REPORT_OUTPUT = DATA_BASE_DIR / "report-rf.json"
 
+if MULTIPROCESS:
+    from tqdm.contrib.concurrent import process_map
+    def map_function(func, iterable):
+        return process_map(func, iterable, max_workers=6, chunksize=8, ncols=80)
+else:
+    from tqdm import tqdm
+    def map_function(func, iterable):
+        return map(func, tqdm(iterable))
 
 # %%
 def float_field(start: float, end: float):
@@ -78,7 +87,8 @@ class Individual:
         "Take one field and re-generate i'ts value"
         field = random.choice(dc.fields(self))
         setattr(self, field.name, field.default_factory())
-        del self.model
+        if hasattr(self, 'model'):
+            del self.model
         return (self,)
 
     def mate_onepoint(self, other) -> tuple[Self, Self]:
@@ -118,11 +128,14 @@ class Individual:
     def evaluate(self, x_train, x_test, y_train, y_test) -> tuple[float]:
         with warnings.catch_warnings(action="ignore"):
             ypred = self.model.fit(x_train, y_train).predict(x_test)
-        error = metrics.mean_squared_error(y_test, ypred)
-        return (error,)
+
+        return (
+            metrics.precision_score(y_test, ypred, average='micro'),
+            metrics.recall_score(y_test, ypred, average='micro'),
+        )
 
 # %%
-creator.create("FitnessMin", base.Fitness, weights=(-1.0, ))
+creator.create("FitnessMin", base.Fitness, weights=(1.0, 1.0))
 creator.create("Individual", Individual, fitness=creator.FitnessMin)
 
 # %%
@@ -142,8 +155,8 @@ def preprocess():
         np.save(X_train_encoded_path, X_train_encoded)
         np.save(X_test_encoded_path, X_test_encoded)
 
-    y_train = pd.read_csv(DATA_BASE_DIR / "y_train.csv", index_col=0)
-    y_test = pd.read_csv(DATA_BASE_DIR / "y_test.csv", index_col=0)
+    y_train = pd.read_csv(DATA_BASE_DIR / "y_train.csv", index_col=0)['human_evaluation']
+    y_test = pd.read_csv(DATA_BASE_DIR / "y_test.csv", index_col=0)['human_evaluation']
 
     return y_train, y_test, X_train_encoded, X_test_encoded
 
@@ -166,32 +179,34 @@ def run(ngen: int, population: int, halloffame: int = 5):
     toolbox.register("individual", creator.Individual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     toolbox.register("mate", Individual.mate_oneattr)
-    toolbox.register("mutate", Individual.mutate, indpb=0.2)
+    toolbox.register("mutate", Individual.mutate)
     toolbox.register("select", tools.selTournament, tournsize=5)
     toolbox.register("evaluate", evaluate)
-    toolbox.register("map", process_map, max_workers=6, chunksize=8, ncols=80)
+    toolbox.register("map", map_function)
 
     pop = toolbox.population(n=population)
     hof = tools.HallOfFame(halloffame)
     stats = tools.Statistics()
     stats.register("min", lambda pop: min(ind.fitness.values for ind in pop))
+    stats.register("max", lambda pop: max(ind.fitness.values for ind in pop))
 
     print("Iniciando Algoritmo")
     elapsed_time = time.perf_counter()
-    pop, log = algorithms.eaSimple(
-        pop, toolbox, 0.2, 0.2, ngen=ngen, halloffame=hof, stats=stats
-    )
+    pop, log = algorithms.eaSimple(pop, toolbox, 0.5, 0.2, ngen=ngen, halloffame=hof, stats=stats)
     elapsed_time = time.perf_counter() - elapsed_time
 
     print(log)
     for i, ind in enumerate(hof, 1):
-        print(f"hof {i} - Error: {ind.fitness.values[0]} - Individual: {ind}")
+        p,r = ind.fitness.values
+        print(f"hof {i} - Precision: {p} - Recall {r} - Individual: {ind}")
 
     model = hof[0].model
-    report = classification_report(y_test, model.predict(X_test_encoded), output_dict=True)
-    report['best_params'] = dc.asdict(hof[0])
-    report['elapsed_time'] = elapsed_time
-    report['log_book'] = log
+    report = {
+        'report': classification_report(y_test, model.fit(X_train_encoded, y_train).predict(X_test_encoded), output_dict=True),
+        'best_params': dc.asdict(hof[0]),
+        'elapsed_time': elapsed_time,
+        'logbook': log
+    }
     return report
 
 
