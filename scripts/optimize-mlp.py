@@ -14,7 +14,7 @@ import spacy
 import numpy as np
 from deap import algorithms, base, creator, tools
 from sklearn.metrics import classification_report
-from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
 from tqdm.contrib.concurrent import process_map
 
 # %%
@@ -24,7 +24,7 @@ POPULATION_SIZE = 32
 RANDOM_STATE = 42
 
 DATA_BASE_DIR = Path("../data/")
-CLASSIFICATION_REPORT_OUTPUT = DATA_BASE_DIR / "report-rf.json"
+CLASSIFICATION_REPORT_OUTPUT = DATA_BASE_DIR / "report-mlp.json"
 
 if MULTIPROCESS:
     from tqdm.contrib.concurrent import process_map
@@ -71,17 +71,19 @@ def bool_field() -> bool:
 
 @dc.dataclass
 class Individual:
-    C: float = float_field(0, 1)
-    kernel: str = str_field('linear', 'poly', 'rbf', 'sigmoid', 'precomputed')
-    degree: int = int_field(0, 8)
-    gamma: str = str_field('scale', 'auto')
-    coef0: float = float_field(0, 1)
-    shrinking: bool = bool_field()
-    probability: bool = bool_field()
+    activation: str = str_field("relu", "logistic", "tanh")
+    solver: str = str_field("lbfgs", "sgd", "adam")
+    alpha: float = float_field(0.00001, 0.1)
+    learning_rate_init: float = float_field(0.01, 0.1)
+    power_t: float = float_field(0.3, 0.7)
+    momentum: float = float_field(0.8, 0.99)
+    beta_1: float = float_field(0.8, 0.99)
+    beta_2: float = float_field(0.99, 0.999)
+    epsilon: float = float_field(5e-9, 5e-8)
 
     @cached_property
     def model(self):
-        return SVC(**dc.asdict(self), random_state=RANDOM_STATE)
+        return MLPClassifier((8, 8), **dc.asdict(self), random_state=RANDOM_STATE)
 
     def mutate(self) -> tuple[Self]:
         "Take one field and re-generate i'ts value"
@@ -229,5 +231,5 @@ def test():
 # %%
 if __name__ == "__main__":
     report = run(ngen=NUM_GENERATIONS, population=POPULATION_SIZE)
-    json.dump(report, CLASSIFICATION_REPORT_OUTPUT.open('w'))
+    json.dump(report, CLASSIFICATION_REPORT_OUTPUT.open('w'), indent=2)
     print(report)
